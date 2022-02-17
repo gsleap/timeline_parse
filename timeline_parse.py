@@ -32,7 +32,10 @@ def time_difference_in_h_m_s(startTimestamp: datetime, endTimestamp: datetime):
 
     return d_hours, d_mins, d_secs
 
+
 def getPlaceLocation(key, value):
+    location = ""
+
     if value == "HOME":
         location = "Assuming home"
     else:
@@ -42,9 +45,20 @@ def getPlaceLocation(key, value):
             value["duration"]["endTimestamp"])
 
         d_hours, d_mins, d_secs = time_difference_in_h_m_s(
-        startTimestamp, endTimestamp)
+            startTimestamp, endTimestamp)
 
-        location = value["location"]["address"].replace("\n", " ").replace(",", " ")
+        # Sometimes a place has a name, not an adress. Try name first, then adress
+        try:
+            location = value["location"]["name"]
+        except:
+            try:
+                location = value["location"]["address"].replace(
+                    "\n", " ").replace(",", " ")
+            except:
+                # neither method worked! Help!
+                print(
+                    f"Error- placeVisit did not have 'name' or 'address'! {value['location']}")
+                exit(4)
     return location
 
 
@@ -69,13 +83,13 @@ def parse_google_timeline_json(filename: str, output_file_handle):
             else:
                 prev_key = list(timeline_list[i-1])[0]
                 prev_value = list(timeline_list[i-1].values())[0]
-                            
+
             key0 = list(timeline_list[i])[0]
             value0 = list(timeline_list[i].values())[0]
 
             next_key = list(timeline_list[i+1])[0]
             next_value = list(timeline_list[i+1].values())[0]
-                    
+
             if key0 == "activitySegment":
                 startTimestamp = iso_timestamp_to_datetime(
                     value0["duration"]["startTimestamp"])
@@ -83,21 +97,29 @@ def parse_google_timeline_json(filename: str, output_file_handle):
                     value0["duration"]["endTimestamp"])
 
                 activityType = value0["activityType"]
-                distance_m = value0["distance"]
+
+                try:
+                    distance_m = value0["distance"]
+                except:
+                    print(
+                        f"WARNING! activitySegment did not have a 'distance'! {value0}. Assuming 0 km?")
+                    distance_m = 0
+
                 d_hours, d_mins, d_secs = time_difference_in_h_m_s(
                     startTimestamp, endTimestamp)
 
                 if activityType == "IN_PASSENGER_VEHICLE" and prev_key == "placeVisit" and next_key == "placeVisit":
                     prev_location = getPlaceLocation(prev_key, prev_value)
                     next_location = getPlaceLocation(next_key, next_value)
-                       
-                    output_file_handle.write(f'"{prev_location}","{next_location}",{startTimestamp:%d/%m/%Y %H:%M:%S},{endTimestamp:%d/%m/%Y %H:%M:%S},{distance_m/1000.}\n')
+
+                    output_file_handle.write(
+                        f'"{prev_location}","{next_location}",{startTimestamp:%d/%m/%Y %H:%M:%S},{endTimestamp:%d/%m/%Y %H:%M:%S},{distance_m/1000.}\n')
                     print(
-                            f"{activityType} from: {prev_location} to {next_location} at time {startTimestamp} to {endTimestamp} ({d_hours}h {d_mins}m {d_secs}s) {distance_m} m")
+                        f"{activityType} from: {prev_location} to {next_location} at time {startTimestamp} to {endTimestamp} ({d_hours}h {d_mins}m {d_secs}s) {distance_m} m")
 
             elif key0 == "placeVisit":
                 pass
-                
+
             else:
                 print("No idea how to process {key0}")
                 exit(3)
