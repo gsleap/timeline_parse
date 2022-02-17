@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 import json
-from locale import D_FMT
 import os
 import sys
 import time
@@ -33,8 +32,23 @@ def time_difference_in_h_m_s(startTimestamp: datetime, endTimestamp: datetime):
 
     return d_hours, d_mins, d_secs
 
+def getPlaceLocation(key, value):
+    if value == "HOME":
+        location = "Assuming home"
+    else:
+        startTimestamp = iso_timestamp_to_datetime(
+            value["duration"]["startTimestamp"])
+        endTimestamp = iso_timestamp_to_datetime(
+            value["duration"]["endTimestamp"])
 
-def parse_google_timeline_json(filename: str):
+        d_hours, d_mins, d_secs = time_difference_in_h_m_s(
+        startTimestamp, endTimestamp)
+
+        location = value["location"]["address"].replace("\n", " ").replace(",", " ")
+    return location
+
+
+def parse_google_timeline_json(filename: str, output_file_handle):
     print(f"Parsing {filename}...")
 
     with open(filename) as json_file:
@@ -44,48 +58,49 @@ def parse_google_timeline_json(filename: str):
         data = json.load(json_file)
         print(f"{filename} read and parsed successfully.")
 
-        prev_line_output = False
+        timeline_list = list(data["timelineObjects"])
+        item_count = len(timeline_list)
 
-        for level0 in data["timelineObjects"]:
-            for key0, value0 in level0.items():
-                if key0 == "activitySegment":
-                    startTimestamp = iso_timestamp_to_datetime(
-                        value0["duration"]["startTimestamp"])
-                    endTimestamp = iso_timestamp_to_datetime(
-                        value0["duration"]["endTimestamp"])
+        for i in range(0, item_count - 1):
+            # There is no record before the first one
+            if i == 0:
+                prev_key = "placeVisit"
+                prev_value = "HOME"
+            else:
+                prev_key = list(timeline_list[i-1])[0]
+                prev_value = list(timeline_list[i-1].values())[0]
+                            
+            key0 = list(timeline_list[i])[0]
+            value0 = list(timeline_list[i].values())[0]
 
-                    activityType = value0["activityType"]
-                    distance_m = value0["distance"]
-                    d_hours, d_mins, d_secs = time_difference_in_h_m_s(
-                        startTimestamp, endTimestamp)
+            next_key = list(timeline_list[i+1])[0]
+            next_value = list(timeline_list[i+1].values())[0]
+                    
+            if key0 == "activitySegment":
+                startTimestamp = iso_timestamp_to_datetime(
+                    value0["duration"]["startTimestamp"])
+                endTimestamp = iso_timestamp_to_datetime(
+                    value0["duration"]["endTimestamp"])
 
-                    # add some criteria here!
-                    # e.g. only passenger vehicles on the 4th Feb 2022
-                    if activityType == "IN_PASSENGER_VEHICLE" and startTimestamp.year == 2022 and startTimestamp.month == 2 and startTimestamp.day == 4:
-                        print(
-                            f"Activity Smegment: {activityType} from: {startTimestamp} to {endTimestamp} ({d_hours}h {d_mins}m {d_secs}s) {distance_m} m")
-                        prev_line_output = True
-                    else:
-                        prev_line_output = False
+                activityType = value0["activityType"]
+                distance_m = value0["distance"]
+                d_hours, d_mins, d_secs = time_difference_in_h_m_s(
+                    startTimestamp, endTimestamp)
 
-                elif key0 == "placeVisit":
-                    startTimestamp = iso_timestamp_to_datetime(
-                        value0["duration"]["startTimestamp"])
-                    endTimestamp = iso_timestamp_to_datetime(
-                        value0["duration"]["endTimestamp"])
+                if activityType == "IN_PASSENGER_VEHICLE" and prev_key == "placeVisit" and next_key == "placeVisit":
+                    prev_location = getPlaceLocation(prev_key, prev_value)
+                    next_location = getPlaceLocation(next_key, next_value)
+                       
+                    output_file_handle.write(f'"{prev_location}","{next_location}",{startTimestamp:%d/%m/%Y %H:%M:%S},{endTimestamp:%d/%m/%Y %H:%M:%S},{distance_m/1000.}\n')
+                    print(
+                            f"{activityType} from: {prev_location} to {next_location} at time {startTimestamp} to {endTimestamp} ({d_hours}h {d_mins}m {d_secs}s) {distance_m} m")
 
-                    d_hours, d_mins, d_secs = time_difference_in_h_m_s(
-                        startTimestamp, endTimestamp)
-
-                    location = value0["location"]["address"].replace("\n", " ")
-
-                    # only show a place if we previously showed an activitySegment
-                    if prev_line_output:
-                        print(
-                            f"Place Visit: {location} from: {startTimestamp} to {endTimestamp} ({d_hours}h {d_mins}m {d_secs}s)")
-                else:
-                    print("No idea how to process {key0}")
-                    exit(3)
+            elif key0 == "placeVisit":
+                pass
+                
+            else:
+                print("No idea how to process {key0}")
+                exit(3)
 
 
 if __name__ == "__main__":
@@ -98,8 +113,13 @@ if __name__ == "__main__":
             print(f"Error: {filename} does not exist!")
             exit(2)
 
-        # ok, let's do the parsing
-        parse_google_timeline_json(filename)
+        # open csv for output
+        output_filename = "output.csv"
+        with open(output_filename, "w") as output_file_handle:
+            # ok, let's do the parsing
+            parse_google_timeline_json(filename, output_file_handle)
+
+        print(f"CSV written to {output_filename}. I'm done!")
     else:
         print("Usage: \npython timeline_parse.py GOOGLE_JSON_FILENAME\n")
         exit(1)
